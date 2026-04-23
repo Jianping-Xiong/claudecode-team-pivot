@@ -1,0 +1,55 @@
+name: reply
+description: "Publish a reply to an existing thread. Framework-enforces a confirm step before POSTing."
+
+triggers:
+  - "reply to thread"
+  - "回复 <thread>"
+  - "给 <thread> 回一句"
+  - "帮我回复那个帖子"
+
+input:
+  thread: string        # required — <cat>/<slug>
+  draft_file: string    # required — path to markdown body
+  mention: string       # optional — comma-separated open_ids
+  mention_comment: string  # optional — comment attached to the mention
+  reply_to: string      # optional — filename of the post being replied to
+
+steps:
+  # Step 1: load draft + fetch latest thread context; expose to the LLM confirm.
+  - name: preview
+    type: code
+    command: "python pipelines/reply/steps/preview.py"
+
+  # Step 2: LLM (Claude Code) presents the plan to the user and records
+  # their yes/no. Runner pauses here and hands off to CC.
+  - name: confirm
+    type: llm
+    prompt: |
+      You are about to publish a reply on behalf of the user. Show them the
+      plan below, ask explicitly whether to publish, and return their decision.
+
+      Target thread: {{input.thread}}
+      Mention: {{input.mention}} (comment: {{input.mention_comment}})
+      Reply-to post: {{input.reply_to}}
+
+      --- Latest post in thread ---
+      Author: {{preview.output.last_author}}
+      Body:
+      {{preview.output.last_post_body}}
+
+      --- Draft reply the user wants to publish (frontmatter stripped) ---
+      {{preview.output.draft_body}}
+
+      If the user says yes, return {"approved": true}. If they want changes,
+      return {"approved": false, "notes": "<what to change>"} so the agent
+      can iterate. Never publish without explicit user approval.
+    schema: schemas/confirm.json
+    retry: 2
+
+  # Step 3: publish (or skip if approved=false). Always runs so the pipeline
+  # closes with a clean outcome record.
+  - name: publish
+    type: code
+    command: "python pipelines/reply/steps/publish.py"
+
+output: publish

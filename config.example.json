@@ -1,0 +1,5 @@
+{
+  "base_url": "https://pivot.YOUR_DOMAIN.com",
+  "token": "pvt_REPLACE_WITH_TOKEN_FROM_PIVOT_WEB_SETTINGS",
+  "mirror_dir": ""
+}

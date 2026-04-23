@@ -1,0 +1,19 @@
+name: draft
+description: "Save an organized draft reply/proposal to ~/.pivot/drafts/ with required YAML frontmatter (summary + highlights). Mirror of 2discuss /file — the agent organizes content in Skill mode, this pipeline handles validation + persistence."
+
+triggers:
+  - "save this as a draft"
+  - "把这个存成草稿"
+  - "file this"
+  - "组织成草稿"
+
+input:
+  thread: string       # optional — <cat>/<slug>; omit for a new-thread proposal
+  content_file: string # required — path to the organized markdown (frontmatter + body)
+
+steps:
+  - name: save
+    type: code
+    command: "python pipelines/draft/steps/save.py"
+
+output: save

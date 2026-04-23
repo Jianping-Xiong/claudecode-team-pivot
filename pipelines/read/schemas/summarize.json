@@ -1,0 +1,31 @@
+{
+  "type": "object",
+  "required": ["brief", "key_points", "actions"],
+  "properties": {
+    "brief": {
+      "type": "string"
+    },
+    "key_points": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "actions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["kind", "description"],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": ["reply", "mention", "mark-read", "change-status", "favorite", "nothing"]
+          },
+          "description": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

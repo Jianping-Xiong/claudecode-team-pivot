@@ -1,0 +1,49 @@
+name: digest
+description: "Time-windowed digest: auto-sync mirror (if stale >1h), list commits, group by thread via LLM, summarize each group. For weekly/daily roll-ups."
+
+triggers:
+  - "weekly digest"
+  - "这周讨论重点"
+  - "近期 pivot 动态"
+  - "summarize the week"
+
+input:
+  since: string   # optional — defaults to 7d. Accepts any git approxidate (7d / 24h / "2 weeks ago").
+  limit: integer  # optional — max commits to pull, defaults to 200.
+
+steps:
+  # Auto-freshen the local mirror so digest never silently summarizes stale
+  # data. Fatal if mirror missing and clone fails; non-fatal on pull fail.
+  # 自动刷 mirror：缺失必须 clone 否则失败；已有但网络挂了 pull 失败只 warn，
+  # 继续用旧数据出 digest，总比完全不给结果强。
+  - name: sync
+    type: code
+    command: "python pipelines/digest/steps/sync.py"
+
+  - name: load
+    type: code
+    command: "python pipelines/digest/steps/load.py"
+
+  - name: group_and_summarize
+    type: llm
+    prompt: |
+      Below are recent commits from the Pivot discussion repo. Each commit
+      subject typically names a thread (e.g. `feat(enclaws/some-slug): ...`).
+
+      Window: {{input.since}} ({{load.output.commit_count}} commits, since
+      {{load.output.window_start}})
+
+      --- Commits ---
+      {{load.output.commits_text}}
+
+      Task: group commits by thread, produce a concise digest. For each
+      thread-group: 1-2 sentences on what changed / who participated / any
+      decision reached. Skip purely mechanical commits (merge / chore / index
+      rebuild) unless they represent a meaningful action.
+
+      Match the repo's dominant language (Chinese for most team content).
+      Return JSON matching the schema.
+    schema: schemas/digest.json
+    retry: 2
+
+output: group_and_summarize

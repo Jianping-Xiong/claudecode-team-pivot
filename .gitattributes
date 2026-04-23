@@ -1,0 +1,13 @@
+# Enforce LF in the repo on all platforms. Line endings in working copies
+# can vary (Git may convert to CRLF on Windows checkout depending on
+# autocrlf), but the stored form is always LF — avoids noisy diffs when
+# Mac / Linux / Windows collaborators push to the same branch.
+* text=auto eol=lf
+
+# Preserve binary / image files as-is.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary

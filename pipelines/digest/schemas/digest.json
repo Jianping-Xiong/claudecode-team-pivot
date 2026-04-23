@@ -1,0 +1,36 @@
+{
+  "type": "object",
+  "required": ["window", "groups", "overall"],
+  "properties": {
+    "window": {
+      "type": "string"
+    },
+    "overall": {
+      "type": "string"
+    },
+    "groups": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["thread", "summary"],
+        "properties": {
+          "thread": {
+            "type": "string"
+          },
+          "commit_count": {
+            "type": "integer"
+          },
+          "participants": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "summary": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

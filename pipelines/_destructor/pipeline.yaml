@@ -1,0 +1,7 @@
+name: _destructor
+description: "Housekeeping: sweep expired sessions. Runs after every business pipeline regardless of outcome."
+
+steps:
+  - name: sweep
+    type: code
+    command: "python pipelines/_destructor/steps/sweep.py"

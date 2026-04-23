@@ -1,0 +1,7 @@
+name: _constructor
+description: "Preflight checks: config.json parseable + token set. Runs before every business pipeline."
+
+steps:
+  - name: check
+    type: code
+    command: "python pipelines/_constructor/steps/check.py"

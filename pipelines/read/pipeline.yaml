@@ -1,0 +1,42 @@
+name: read
+description: "Read a thread: fetch full detail, summarize it in natural language, propose next actions (reply / @ someone / mark-read / just brief)."
+
+triggers:
+  - "read the thread"
+  - "聊聊 <thread>"
+  - "那个讨论讲了什么"
+  - "帮我看下 <thread>"
+  - "summarize this thread"
+
+input:
+  thread: string    # required — <category>/<slug>
+
+steps:
+  - name: fetch
+    type: code
+    command: "python pipelines/read/steps/fetch.py"
+
+  - name: summarize
+    type: llm
+    prompt: |
+      Summarize the following Pivot thread for the user. Be concise.
+      Match the thread's dominant language (Chinese if the body is Chinese,
+      English otherwise). Do not pad with boilerplate.
+
+      Thread: {{input.thread}}
+      Title: {{fetch.output.title}}
+      Status: {{fetch.output.status}}
+      Author: {{fetch.output.author}}
+      Posts: {{fetch.output.post_count}}
+
+      --- Posts (oldest first) ---
+      {{fetch.output.posts_text}}
+
+      Return JSON matching the schema: a 3-5 sentence `brief`, a list of
+      `key_points` (each a one-liner), and `actions` — suggested next steps
+      the user might want (reply draft, @ teammate, mark-read, change status,
+      or nothing). Keep actions grounded in the thread content; do not invent.
+    schema: schemas/summarize.json
+    retry: 2
+
+output: summarize
