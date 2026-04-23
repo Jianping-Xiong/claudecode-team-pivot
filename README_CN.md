@@ -1,6 +1,8 @@
 # claudecode-team-pivot
 
 > **个人实验工具。** 不是 team-pivot-web 的官方客户端，为我自己的 AI-native CLI 工作流做的。一个人维护，无 SLA，欢迎 issue / PR。
+>
+> **跟踪注记（2026-04-23）。** [Pivot 团队已批准 matter 模型改造](https://pivot.enclaws.com/t/Pivot/Pivot%20%E4%BA%A7%E5%93%81%E8%AE%BE%E8%AE%A1%20-%20%E8%AE%BE%E8%AE%A1%E5%93%B2%E5%AD%A6%E5%92%8C%E5%9F%BA%E6%9C%AC%E5%8E%9F%E7%90%86)：6 态状态机（`planning / executing / paused / finished / cancelled / reviewed`）+ 5 类文档（`think / act / verify / result / insight`）+ 新 `/api/matters/*` 接口。旧 `/api/threads/*` 开发期保留，本 skill 当前所有功能**不受影响**。等新接口上线后再同步迁移——届时会有 Thread → Matter 术语切换和状态/类型变更。
 
 Claude Code **APP**（[Agent Pipeline Protocol v0.4](https://github.com/hashSTACS-Global/agent-pipeline-protocol)），用自然语言和 [team-pivot-web](https://github.com/hashSTACS-Global/team-pivot-web) 讨论平台交互——浏览讨论、AI 起草回复（带强制确认闸门）、@ 同事、搜讨论历史、周度汇总。
 

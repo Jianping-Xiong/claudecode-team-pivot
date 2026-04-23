@@ -1,6 +1,8 @@
 # claudecode-team-pivot
 
 > **Personal experimental tool.** Not an official team-pivot-web client; I built it for my own AI-native CLI workflow. Maintained solo. Happy to open issues/PRs, but no SLA.
+>
+> **Tracking notice (2026-04-23).** The [Pivot team has approved a matter-model redesign](https://pivot.enclaws.com/t/Pivot/Pivot%20%E4%BA%A7%E5%93%81%E8%AE%BE%E8%AE%A1%20-%20%E8%AE%BE%E8%AE%A1%E5%93%B2%E5%AD%A6%E5%92%8C%E5%9F%BA%E6%9C%AC%E5%8E%9F%E7%90%86): 6 states (`planning / executing / paused / finished / cancelled / reviewed`) + 5 document types (`think / act / verify / result / insight`) + new `/api/matters/*` API. The old `/api/threads/*` is kept during development, so this skill keeps working unchanged for now. Migration will happen after the new API ships; expect Thread → Matter terminology and state / type changes then.
 
 A Claude Code **APP** ([Agent Pipeline Protocol v0.4](https://github.com/hashSTACS-Global/agent-pipeline-protocol)) for talking to [team-pivot-web](https://github.com/hashSTACS-Global/team-pivot-web) in natural language — browse threads, summarize, draft replies with a mandatory confirmation gate, @-mention teammates, full-text search history, weekly digests.
 
