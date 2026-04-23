@@ -220,9 +220,26 @@ def validate_schema(obj: Any, schema: dict, path: str = "") -> list[str]:
 # Step execution
 # ---------------------------------------------------------------------------
 
+def _normalize_python_cmd(cmd: str) -> str:
+    """Replace a leading `python` / `python3` token with sys.executable.
+
+    macOS Ventura+ only ships `python3`; Windows typically only `python`.
+    Pipeline authors shouldn't care — whichever interpreter is running this
+    runner.py is the one that should run step scripts too.
+    Quote sys.executable since on Windows it may contain spaces
+    (`C:\\Program Files\\Python313\\python.exe`).
+    macOS 没 `python`，Windows 没 `python3`；pipeline.yaml 不该操心，
+    直接用 runner 自己的解释器。路径可能含空格（Windows），要带引号。
+    """
+    m = re.match(r"^(python3?)(?=\s|$)", cmd)
+    if not m:
+        return cmd
+    return f'"{sys.executable}" {cmd[m.end():].lstrip()}'
+
+
 def run_code_step(step: dict, pipeline_dir: Path, input_: dict, steps: dict) -> dict:
     """Execute a `code` step as a subprocess. stdin/stdout JSON per spec §4.1."""
-    cmd = step["command"]
+    cmd = _normalize_python_cmd(step["command"])
     payload = {"input": input_, "steps": {k: {"output": v.get("output")} for k, v in steps.items()}}
     # Pass PYTHONIOENCODING=utf-8 so step scripts' print() emits UTF-8 bytes,
     # regardless of the Windows console codepage.
@@ -285,8 +302,10 @@ def run_validator(validate_path: Path, llm_output: Any, input_: dict, steps: dic
         "steps": {k: {"output": v.get("output")} for k, v in steps.items()},
     }
     child_env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
+    # Use sys.executable so validator scripts run under the same interpreter
+    # as runner.py — portable across macOS (python3-only) and Windows.
     result = subprocess.run(
-        ["python", str(validate_path)],
+        [sys.executable, str(validate_path)],
         cwd=str(APP_ROOT),
         input=json.dumps(payload, ensure_ascii=False),
         capture_output=True,
