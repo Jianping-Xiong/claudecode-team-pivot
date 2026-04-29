@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
-"""Load the draft file + fetch latest thread context. Output is consumed by
+"""Load the draft file + fetch latest matter context. Output is consumed by
 the confirm LLM step to render an accurate plan for the user.
+
+v0.5: migrated to Matter API get_matter.
 
 Keeps output small: only the last post's body, not every post, to avoid
 blowing up the prompt context.
@@ -20,7 +22,6 @@ import re
 import sys
 from pathlib import Path
 
-# Allow importing the api module from the bin/ directory.
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "bin"))
 from api import PivotAPI, PivotAPIError  # noqa: E402
 
@@ -41,14 +42,20 @@ def _load_config() -> dict:
     return cfg
 
 
+def _resolve_matter_id(thread: str) -> str:
+    if "/" in thread:
+        return thread.split("/", 1)[1]
+    return thread
+
+
 def main() -> int:
     payload = json.loads(sys.stdin.read() or "{}")
     input_ = payload.get("input", {})
 
     thread = input_.get("thread") or ""
     draft_file = input_.get("draft_file") or ""
-    if "/" not in thread:
-        print("reply.preview: --thread must be <category>/<slug>", file=sys.stderr)
+    if not thread:
+        print("reply.preview: --thread <matter_id> required", file=sys.stderr)
         return 1
     if not draft_file:
         print("reply.preview: --draft-file required", file=sys.stderr)
@@ -61,31 +68,28 @@ def main() -> int:
     draft_full = draft_path.read_text(encoding="utf-8-sig")
 
     # Strip optional YAML frontmatter — it's local metadata, never POSTed.
-    # 剥离 YAML frontmatter，只留正文准备 POST。
     m = re.match(r"^---\s*\n.*?\n---\s*\n", draft_full, flags=re.DOTALL)
     draft_body = draft_full[m.end():] if m else draft_full
     draft_body = draft_body.lstrip("\n")
 
+    matter_id = _resolve_matter_id(thread)
     cfg = _load_config()
     api = PivotAPI(cfg["base_url"], cfg.get("token", ""))
-    category, slug = thread.split("/", 1)
     try:
-        detail = api.get_thread(category, slug)
+        detail = api.get_matter(matter_id)
     except PivotAPIError as e:
-        print(f"reply.preview: cannot fetch thread {thread}: {e}", file=sys.stderr)
+        print(f"reply.preview: cannot fetch matter {matter_id}: {e}", file=sys.stderr)
         return 1
 
-    posts = detail.get("posts", [])
-    last = posts[-1] if posts else {}
+    timeline = detail.get("timeline", [])
+    last = timeline[-1] if timeline else {}
     out = {
         "output": {
-            "thread_title": detail.get("meta", {}).get("title", ""),
-            "post_count": len(posts),
-            "last_author": last.get("author_display", ""),
-            "last_post_body": last.get("body", "")[:4000],  # cap for prompt size
-            # draft_body is the publishable content (frontmatter stripped);
-            # draft_full is the raw file content, kept for traceability only.
-            # draft_body 供发布；draft_full 保留原文便于回溯。
+            "thread_title": detail.get("matter", {}).get("title", ""),
+            "matter_id": matter_id,
+            "post_count": len(timeline),
+            "last_author": last.get("creator_display") or last.get("creator", ""),
+            "last_post_body": (last.get("body") or "")[:4000],
             "draft_body": draft_body,
             "draft_full": draft_full,
             "draft_path": str(draft_path),

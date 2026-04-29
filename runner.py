@@ -683,7 +683,7 @@ def cmd_setup(args) -> dict:
             "next_steps": [
                 "python runner.py check-init",
                 "python runner.py list",
-                "python bin/pivot.py threads --limit 5",
+                "python bin/pivot.py matters --limit 5",
             ],
         },
     }

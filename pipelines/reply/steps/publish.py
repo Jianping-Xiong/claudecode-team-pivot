@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""Publish the reply (or skip cleanly if the user did not approve).
+"""Publish the reply via Matter API append_file.
 
+v0.5: migrated from deprecated api.reply() to api.append_file().
 Reads steps.confirm.output.approved from stdin. If false, returns a
 skipped-status output — no POST happens.
 用户没点同意就不 POST，返回 skipped 状态。
@@ -30,13 +31,19 @@ def _load_config() -> dict:
     return cfg
 
 
-def _build_mentions(mention: str, comment: str) -> dict | None:
+def _resolve_matter_id(thread: str) -> str:
+    if "/" in thread:
+        return thread.split("/", 1)[1]
+    return thread
+
+
+def _parse_comments(mention: str, comment: str) -> list[dict] | None:
     if not mention:
         return None
     open_ids = [x.strip() for x in mention.split(",") if x.strip()]
     if not open_ids:
         return None
-    return {"open_ids": open_ids, "comments": (comment or "mention").strip() or "mention"}
+    return [{"body": (comment or "mention").strip() or "mention", "mentions": open_ids}]
 
 
 def main() -> int:
@@ -57,27 +64,28 @@ def main() -> int:
         return 0
 
     preview = (steps.get("preview") or {}).get("output") or {}
-    # draft_body is frontmatter-stripped; fall back to draft_full for older
-    # snapshots or resumed sessions from before this field existed.
-    # draft_body 已剥 frontmatter；兼容老会话 fallback 到 draft_full。
-    draft_content = preview.get("draft_body") or preview.get("draft_content") or preview.get("draft_full") or ""
+    draft_content = preview.get("draft_body") or preview.get("draft_full") or ""
     if not draft_content.strip():
         print("reply.publish: empty draft — refusing to post", file=sys.stderr)
         return 1
 
     thread = input_.get("thread") or ""
-    category, slug = thread.split("/", 1)
+    matter_id = _resolve_matter_id(thread)
+    comments = _parse_comments(
+        input_.get("mention") or "",
+        input_.get("mention_comment") or "",
+    )
 
     cfg = _load_config()
     api = PivotAPI(cfg["base_url"], cfg.get("token", ""))
 
     try:
-        result = api.reply(
-            category, slug,
+        result = api.append_file(
+            matter_id,
+            type="think",
+            summary="",
             body=draft_content,
-            mentions=_build_mentions(input_.get("mention") or "", input_.get("mention_comment") or ""),
-            reply_to=(input_.get("reply_to") or None),
-            references=[],
+            comments=comments,
         )
     except PivotAPIError as e:
         print(f"reply.publish: API error: {e}", file=sys.stderr)
@@ -87,7 +95,7 @@ def main() -> int:
         "output": {
             "status": "published",
             "result": result,
-            "thread": thread,
+            "matter_id": matter_id,
         }
     }
     print(json.dumps(out, ensure_ascii=False))

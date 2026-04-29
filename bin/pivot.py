@@ -7,6 +7,9 @@ subprocess, argparse). Intent understanding and orchestration live in SKILL.md
 
 本脚本只做确定性操作（HTTP / git / argparse）。意图理解和编排交给
 SKILL.md，由 agent 组合这些原子命令。
+
+v0.5: migrated from deprecated /api/threads/* to /api/matters/*.
+v0.5: 从已废弃的 /api/threads/* 迁移到 /api/matters/*。
 """
 from __future__ import annotations
 
@@ -17,8 +20,6 @@ import sys
 from pathlib import Path
 from typing import Any, Optional
 
-# bin/ is the canonical location; add it to sys.path for direct execution.
-# 支持直接执行 pivot.py 时正确 import 同级模块。
 _BIN_DIR = Path(__file__).resolve().parent
 if str(_BIN_DIR) not in sys.path:
     sys.path.insert(0, str(_BIN_DIR))
@@ -36,9 +37,6 @@ def load_config() -> dict:
     cfg: dict = {}
     if cfg_path.exists():
         try:
-            # utf-8-sig tolerates an optional BOM; PowerShell 5.1's Set-Content
-            # -Encoding UTF8 writes one by default on Windows.
-            # utf-8-sig 容忍可选 BOM；PS 5.1 的 Set-Content -Encoding UTF8 默认加 BOM。
             cfg = json.loads(cfg_path.read_text(encoding="utf-8-sig"))
         except json.JSONDecodeError as e:
             _die(f"{cfg_path} is not valid JSON: {e}")
@@ -68,27 +66,6 @@ def require_token(cfg: dict) -> None:
 
 # ------------------------------- utils -----------------------------------
 
-def split_thread_key(key: str) -> tuple:
-    if "/" not in key:
-        _die(f"thread key must be <category>/<slug>, got: {key}")
-    cat, slug = key.split("/", 1)
-    return cat, slug
-
-
-def _build_mentions(mention: Optional[str], comment: Optional[str]) -> Optional[dict]:
-    if not mention:
-        return None
-    open_ids = [x.strip() for x in mention.split(",") if x.strip()]
-    if not open_ids:
-        return None
-    return {
-        "open_ids": open_ids,
-        # Server requires comments to be non-empty. Default tag if skill forgot.
-        # 服务端要求 comments 非空；skill 忘传时用占位，但应尽量传真实评论。
-        "comments": (comment or "mention").strip() or "mention",
-    }
-
-
 def _print(data: Any) -> None:
     print(json.dumps(data, ensure_ascii=False, indent=2))
 
@@ -96,6 +73,19 @@ def _print(data: Any) -> None:
 def _die(msg: str) -> None:
     print(f"Error: {msg}", file=sys.stderr)
     sys.exit(2)
+
+
+def _parse_comments(raw: Optional[str]) -> Optional[list[dict]]:
+    """Parse --mention and --mention-comment into comments array for Matter API.
+    Format: [{"body": "<comment>", "mentions": ["ou_xxx", ...]}]
+    """
+    if not raw:
+        return None
+    open_ids = [x.strip() for x in raw.split(",") if x.strip()]
+    if not open_ids:
+        return None
+    comment_body = "mention"
+    return [{"body": comment_body, "mentions": open_ids}]
 
 
 # -------------------------- command handlers ------------------------------
@@ -106,101 +96,96 @@ def cmd_me(args, cfg: dict) -> None:
     _print(api.me())
 
 
-def cmd_threads(args, cfg: dict) -> None:
+def cmd_matters(args, cfg: dict) -> None:
+    """List matters. Replaces old `threads` command."""
     require_token(cfg)
     api = PivotAPI(cfg["base_url"], cfg["token"])
-    data = api.list_threads(category=args.category)
+    data = api.list_matters(
+        status=args.status or None,
+        owner=args.owner or None,
+        q=args.q or None,
+    )
     items = data.get("items", [])
     if args.favorite_only:
         items = [t for t in items if t.get("favorite")]
     if args.unread_first:
-        # Secondary sort by last_updated desc; server already returned
-        # last_updated-desc order, so stable sort preserves it within ties.
         items.sort(key=lambda t: -(t.get("unread_count") or 0))
-    # else: trust server order (last_updated desc)
     if args.limit and args.limit > 0:
         items = items[: args.limit]
     _print({"items": items})
 
 
 def cmd_show(args, cfg: dict) -> None:
+    """Show matter detail. matter_id is the slug/ID (not category/slug)."""
     require_token(cfg)
     api = PivotAPI(cfg["base_url"], cfg["token"])
-    cat, slug = split_thread_key(args.thread)
-    _print(api.get_thread(cat, slug))
+    _print(api.get_matter(args.matter_id))
 
 
 def cmd_reply(args, cfg: dict) -> None:
+    """Append a file to an existing matter."""
     require_token(cfg)
     api = PivotAPI(cfg["base_url"], cfg["token"])
-    cat, slug = split_thread_key(args.thread)
-    # utf-8-sig tolerates the BOM that PowerShell 5.1's Set-Content adds.
-    # utf-8-sig 容忍 PS 5.1 写文件时加的 BOM。
     body = Path(args.file).read_text(encoding="utf-8-sig")
-    mentions = _build_mentions(args.mention, args.mention_comment)
+    comments = _parse_comments(args.mention)
     _print(
-        api.reply(
-            cat, slug,
+        api.append_file(
+            args.matter_id,
+            type=args.type or "think",
+            summary=args.summary or "",
             body=body,
-            mentions=mentions,
-            reply_to=args.reply_to,
-            references=args.references or [],
+            quote=args.quote or None,
+            refer=args.references or None,
+            comments=comments,
         )
     )
 
 
 def cmd_new(args, cfg: dict) -> None:
+    """Create a new matter."""
     require_token(cfg)
     api = PivotAPI(cfg["base_url"], cfg["token"])
-    # utf-8-sig tolerates the BOM that PowerShell 5.1's Set-Content adds.
-    # utf-8-sig 容忍 PS 5.1 写文件时加的 BOM。
     body = Path(args.file).read_text(encoding="utf-8-sig")
-    mentions = _build_mentions(args.mention, args.mention_comment)
+    comments = _parse_comments(args.mention)
     _print(
-        api.new_thread(
-            category=args.category, title=args.title, body=body, mentions=mentions,
+        api.create_matter(
+            category=args.category,
+            title=args.title,
+            initial_type=args.type or "think",
+            summary=args.summary or args.title,
+            body=body,
+            comments=comments,
         )
     )
 
 
 def cmd_mention(args, cfg: dict) -> None:
+    """Add a comment with @-mentions on a target file. Triggers Feishu notification."""
     require_token(cfg)
     api = PivotAPI(cfg["base_url"], cfg["token"])
-    cat, slug = split_thread_key(args.thread)
     open_ids = [x.strip() for x in (args.mention or "").split(",") if x.strip()]
     if not open_ids:
-        _die("--mention requires at least one open_id")
-    if not args.mention_comment:
-        _die("--mention-comment required")
+        _die("--mention requires at least one open_id (ou_xxx)")
     _print(
-        api.add_mention(
-            cat, slug,
-            target_filename=args.target_filename,
-            open_ids=open_ids,
-            comments=args.mention_comment,
+        api.add_comment(
+            args.matter_id,
+            target_file=args.target_filename,
+            body=args.mention_comment or "",
+            mentions=open_ids,
         )
     )
-
-
-def cmd_status(args, cfg: dict) -> None:
-    require_token(cfg)
-    api = PivotAPI(cfg["base_url"], cfg["token"])
-    cat, slug = split_thread_key(args.thread)
-    _print(api.change_status(cat, slug, to=args.to, reason=args.reason))
 
 
 def cmd_favorite(args, cfg: dict) -> None:
     require_token(cfg)
     api = PivotAPI(cfg["base_url"], cfg["token"])
-    cat, slug = split_thread_key(args.thread)
-    _print(api.set_favorite(cat, slug, favorite=not args.unfavorite))
+    _print(api.toggle_favorite(args.matter_id, favorite=not args.unfavorite))
 
 
 def cmd_read(args, cfg: dict) -> None:
     require_token(cfg)
     api = PivotAPI(cfg["base_url"], cfg["token"])
-    cat, slug = split_thread_key(args.thread)
-    _print(api.mark_read(cat, slug))
+    _print(api.mark_read(args.matter_id))
 
 
 def cmd_contacts(args, cfg: dict) -> None:
@@ -221,8 +206,7 @@ def cmd_sync(args, cfg: dict) -> None:
 
 
 def cmd_search(args, cfg: dict) -> None:
-    # search / history are local-only (read the mirror dir), no API calls.
-    # Mirror still needs an instance to resolve repo_path_if_ready.
+    """Full-text search in the local git mirror. Only covers mirrored files."""
     mirror = Mirror(None, mirror_dir=cfg["mirror_dir"] or None)
     repo = mirror.repo_path_if_ready()
     if not repo:
@@ -244,66 +228,60 @@ def cmd_history(args, cfg: dict) -> None:
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="pivot.py",
-        description="Team Pivot CLI (claudecode-team-pivot skill).",
+        description="Team Pivot CLI (claudecode-team-pivot skill) — Matter API v0.5.",
     )
     sub = p.add_subparsers(dest="cmd", required=True)
 
     # me
     sub.add_parser("me", help="Print current user (verify token).")
 
-    # threads
-    sp = sub.add_parser("threads", help="List threads.")
-    sp.add_argument("--category", help="Filter by category.")
+    # matters (was "threads")
+    sp = sub.add_parser("matters", help="List matters.")
+    sp.add_argument("--status", help="Filter by status (planning/executing/paused/...).")
+    sp.add_argument("--owner", help="Filter by owner (pinyin).")
+    sp.add_argument("--q", help="Search in titles only.")
     sp.add_argument("--unread-first", action="store_true", help="Sort unread first.")
     sp.add_argument("--favorite-only", action="store_true", help="Show favorites only.")
     sp.add_argument("--limit", type=int, default=0, help="Max items (0 = all).")
 
     # show
-    sp = sub.add_parser("show", help="Show thread detail.")
-    sp.add_argument("thread", help="<category>/<slug>")
+    sp = sub.add_parser("show", help="Show matter detail with timeline.")
+    sp.add_argument("matter_id", help="Matter ID (e.g. 'OPC-数字员工服务台-产品规划').")
 
     # reply
-    sp = sub.add_parser("reply", help="Reply to an existing thread.")
-    sp.add_argument("thread", help="<category>/<slug>")
+    sp = sub.add_parser("reply", help="Append a file to a matter.")
+    sp.add_argument("matter_id")
     sp.add_argument("--file", required=True, help="Markdown body file.")
-    sp.add_argument("--mention", help="Comma-separated open_ids.")
-    sp.add_argument("--mention-comment", help="Comment shown in mention notification.")
-    sp.add_argument("--reply-to", help="Filename of the post being replied to.")
+    sp.add_argument("--type", default="think", help="File type (think/act/verify/result/insight).")
+    sp.add_argument("--summary", default="", help="One-line summary.")
+    sp.add_argument("--mention", help="Comma-separated open_ids for @-mention.")
+    sp.add_argument("--quote", help="Filename of the post being quoted.")
     sp.add_argument("--references", nargs="*", help="Referenced post filenames.")
 
     # new
-    sp = sub.add_parser("new", help="Start a new thread.")
+    sp = sub.add_parser("new", help="Create a new matter.")
     sp.add_argument("category")
     sp.add_argument("--title", required=True)
     sp.add_argument("--file", required=True, help="Markdown body file.")
-    sp.add_argument("--mention")
-    sp.add_argument("--mention-comment")
+    sp.add_argument("--type", default="think", help="Initial file type (default: think).")
+    sp.add_argument("--summary", default="", help="One-line summary (defaults to title).")
+    sp.add_argument("--mention", help="Comma-separated open_ids for @-mention.")
 
     # mention
-    sp = sub.add_parser("mention", help="Add a standalone mention to an existing post.")
-    sp.add_argument("thread")
+    sp = sub.add_parser("mention", help="Add a comment with @-mentions on an existing file.")
+    sp.add_argument("matter_id")
     sp.add_argument("--target-filename", required=True)
-    sp.add_argument("--mention", required=True)
-    sp.add_argument("--mention-comment", required=True)
-
-    # status
-    sp = sub.add_parser("status", help="Change thread status.")
-    sp.add_argument("thread")
-    sp.add_argument(
-        "--to", required=True,
-        choices=["open", "pending", "resolved", "closed"],
-        help="Target status; server rejects invalid transitions.",
-    )
-    sp.add_argument("--reason")
+    sp.add_argument("--mention", required=True, help="Comma-separated open_ids.")
+    sp.add_argument("--mention-comment", required=True, help="Comment body.")
 
     # favorite
-    sp = sub.add_parser("favorite", help="Toggle favorite.")
-    sp.add_argument("thread")
+    sp = sub.add_parser("favorite", help="Toggle favorite on a matter.")
+    sp.add_argument("matter_id")
     sp.add_argument("--unfavorite", action="store_true")
 
     # read
-    sp = sub.add_parser("read", help="Mark thread as read.")
-    sp.add_argument("thread")
+    sp = sub.add_parser("read", help="Mark matter as read.")
+    sp.add_argument("matter_id")
 
     # contacts
     sp = sub.add_parser("contacts", help="List or search contacts.")
@@ -314,27 +292,26 @@ def build_parser() -> argparse.ArgumentParser:
     sp = sub.add_parser("sync", help="Clone or pull the local git mirror.")
     sp.add_argument("--check", action="store_true", help="Only report status, don't sync.")
 
-    # search
-    sp = sub.add_parser("search", help="Full-text search in the local mirror.")
+    # search (mirror-based)
+    sp = sub.add_parser("search", help="Full-text search in the local mirror (title+body).")
     sp.add_argument("pattern")
     sp.add_argument("--limit", type=int, default=50)
 
     # history
     sp = sub.add_parser("history", help="Git log summary from the local mirror.")
-    sp.add_argument("--since", default="7d", help="e.g. 7d, 24h, 2w, or any git approxidate.")
-    sp.add_argument("--limit", type=int, default=200, help="Max commits to return.")
+    sp.add_argument("--since", default="7d")
+    sp.add_argument("--limit", type=int, default=200)
 
     return p
 
 
 HANDLERS = {
     "me": cmd_me,
-    "threads": cmd_threads,
+    "matters": cmd_matters,
     "show": cmd_show,
     "reply": cmd_reply,
     "new": cmd_new,
     "mention": cmd_mention,
-    "status": cmd_status,
     "favorite": cmd_favorite,
     "read": cmd_read,
     "contacts": cmd_contacts,

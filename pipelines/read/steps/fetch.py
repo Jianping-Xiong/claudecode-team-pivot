@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""Fetch thread detail and flatten posts into a prompt-ready text block.
+"""Fetch matter detail and flatten posts into a prompt-ready text block.
 
+v0.5: migrated from deprecated get_thread to Matter API get_matter.
 Cap per-post body at 3000 chars so the combined prompt stays under typical
 context budgets. Truncation is marked explicitly.
 每条 post body 截到 3000 字，避免总 prompt 太大；截断时显式标注。
@@ -38,55 +39,56 @@ def _truncate(body: str, cap: int) -> str:
     return body[:cap] + f"\n\n...[truncated, original {len(body)} chars]..."
 
 
+def _resolve_matter_id(thread: str) -> str:
+    """Accept both 'matter_id' and 'category/matter_id' formats."""
+    if "/" in thread:
+        return thread.split("/", 1)[1]
+    return thread
+
+
 def main() -> int:
     payload = json.loads(sys.stdin.read() or "{}")
     input_ = payload.get("input", {})
 
     thread = input_.get("thread") or ""
-    if "/" not in thread:
-        print("read.fetch: --thread must be <category>/<slug>", file=sys.stderr)
+    if not thread:
+        print("read.fetch: --thread <matter_id> required", file=sys.stderr)
         return 1
 
-    cat, slug = thread.split("/", 1)
+    matter_id = _resolve_matter_id(thread)
     cfg = _load_config()
     api = PivotAPI(cfg["base_url"], cfg.get("token", ""))
 
     try:
-        detail = api.get_thread(cat, slug)
+        detail = api.get_matter(matter_id)
     except PivotAPIError as e:
-        print(f"read.fetch: cannot fetch thread {thread}: {e}", file=sys.stderr)
+        print(f"read.fetch: cannot fetch matter {matter_id}: {e}", file=sys.stderr)
         return 1
 
-    meta = detail.get("meta", {})
-    posts = detail.get("posts", [])
+    matter = detail.get("matter", {})
+    timeline = detail.get("timeline", [])
 
-    # Stitch posts into a single text block in oldest-first order.
-    # 把每条 post 拼成有序文本块，供 LLM step 阅读。
     parts: list[str] = []
-    for p in posts:
-        fm = p.get("frontmatter") or {}
-        author = p.get("author_display") or fm.get("author") or "?"
-        ptype = fm.get("type") or "post"
-        created = fm.get("created") or ""
+    for p in timeline:
+        ptype = p.get("type") or "post"
+        creator = p.get("creator_display") or p.get("creator") or "?"
+        created_at = p.get("created_at") or ""
         body = _truncate(p.get("body") or "", POST_BODY_CAP)
-        mentions = p.get("mentions") or []
-        mention_note = ""
-        if mentions:
-            mention_note = " (has @mentions)"
+        has_mentions = " (has @mentions)" if (p.get("comments") or []) else ""
         parts.append(
-            f"### [{ptype}] {author} · {created}{mention_note}\n{body}"
+            f"### [{ptype}] {creator} · {created_at}{has_mentions}\n{body}"
         )
     posts_text = "\n\n".join(parts) if parts else "(no posts)"
 
     out = {
         "output": {
             "thread": thread,
-            "title": meta.get("title", ""),
-            "author": meta.get("author_display", ""),
-            "status": meta.get("status", ""),
-            "post_count": len(posts),
-            "last_updated": meta.get("last_updated", ""),
-            "favorite": meta.get("favorite", False),
+            "matter_id": matter_id,
+            "title": matter.get("title", ""),
+            "status": matter.get("current_status", ""),
+            "post_count": len(timeline),
+            "last_updated": matter.get("updated_at", ""),
+            "favorite": matter.get("favorite", False),
             "posts_text": posts_text,
         }
     }

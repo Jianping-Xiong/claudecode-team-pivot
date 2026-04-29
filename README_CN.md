@@ -1,73 +1,74 @@
 # claudecode-team-pivot
 
-> **个人实验工具。** 不是 team-pivot-web 的官方客户端，为我自己的 AI-native CLI 工作流做的。一个人维护，无 SLA，欢迎 issue / PR。
+> **个人实验工具。** 不是 team-pivot-web 的官方客户端，为我自己的 AI-native 工作流做的。一个人维护，无 SLA，欢迎 issue / PR。
 >
-> **跟踪注记（2026-04-23）。** [Pivot 团队已批准 matter 模型改造](https://pivot.enclaws.com/t/Pivot/Pivot%20%E4%BA%A7%E5%93%81%E8%AE%BE%E8%AE%A1%20-%20%E8%AE%BE%E8%AE%A1%E5%93%B2%E5%AD%A6%E5%92%8C%E5%9F%BA%E6%9C%AC%E5%8E%9F%E7%90%86)：6 态状态机（`planning / executing / paused / finished / cancelled / reviewed`）+ 5 类文档（`think / act / verify / result / insight`）+ 新 `/api/matters/*` 接口。旧 `/api/threads/*` 开发期保留，本 skill 当前所有功能**不受影响**。等新接口上线后再同步迁移——届时会有 Thread → Matter 术语切换和状态/类型变更。
+> **MCP 优先注记（2026-04-29）。** 当前工作模式是：Pivot MCP 服务器作为主路径，本 skill 作为操作手册和 CLI/runner 兜底。代码已迁移到 Matter API（`/api/matters/*`），对应状态为 `planning / executing / paused / finished / cancelled / reviewed`，文件类型为 `think / act / verify / result / insight`。旧 `/api/threads/*` 概念不再作为用户文档主线。
 
-Claude Code **APP**（[Agent Pipeline Protocol v0.4](https://github.com/hashSTACS-Global/agent-pipeline-protocol)），用自然语言和 [team-pivot-web](https://github.com/hashSTACS-Global/team-pivot-web) 讨论平台交互——浏览讨论、AI 起草回复（带强制确认闸门）、@ 同事、搜讨论历史、周度汇总。
+这个仓库给 Claude Code 提供一份紧凑的 Pivot 操作手册，以及 MCP 暂未覆盖时可用的本地工具。它面向 [team-pivot-web](https://github.com/hashSTACS-Global/team-pivot-web)，支持浏览 matter、读取时间线文件、带确认闸门的回复草稿、@ 同事、本地历史搜索和周报摘要。
 
-两条执行通路：
-- **`runner.py` 跑 pipeline**：多步流程、框架强制 preflight、含 LLM 步（read / reply / draft / digest），与 Claude Code 通过 `{status:paused, llm_request:{...}}` / `resume` 协议交接
-- **`bin/pivot.py` 原子命令**：单次 API 调用（threads / show / contacts / mention / status / favorite / read / sync / search / history / me），零依赖，不要 PyYAML
+执行通路按优先级分三层：
 
-## 前置依赖
+1. **Pivot MCP tools**：主路径。用于列 matter、解析 URL/context、读取 matter 详情、读取文件正文、创建时间线文件。它直接走当前 Matter API，也绕开本地编码和路径问题。
+2. **`bin/pivot.py` 原子 CLI**：兜底路径。用于查联系人、独立 @-mention 评论、标已读、收藏、本地 mirror 同步/搜索/历史，以及 MCP 不可用时的基本操作。
+3. **`runner.py` pipeline**：遗留/复杂流程。基于 Agent Pipeline Protocol v0.4 的 paused/resume 交接，适合 read/reply/draft/digest 这类需要 preflight 或确认闸门的流程。
 
-- **Claude Code** 已安装（`~/.claude/skills/` 存在或可创建）
-- **Python 3.8+** — macOS Ventura+ 不再预装 Python，需从 [python.org](https://www.python.org/downloads/) 或 Homebrew (`brew install python`) 装；Windows 用 python.org 的安装器自动加 PATH
-- **PyYAML** — `runner.py` pipeline 必需。`python3 -m pip install pyyaml`。（`bin/pivot.py` 原子命令不需要）
-  - macOS Ventura+ 用 python.org 安装器可能撞 PEP 668 `externally-managed-environment` 错。三种处理（按推荐序）：
-    1. `brew install python` 然后 `python3 -m pip install pyyaml`（最干净）
-    2. `python3 -m pip install --user pyyaml`（装到用户级 site-packages）
-    3. `python3 -m pip install --break-system-packages pyyaml`（最后手段，用便利换掉安全边界）
-- **git** — macOS 预装（首次使用时弹 Xcode Command Line Tools 安装）或 `brew install git`；Windows 从 [git-scm.com](https://git-scm.com/) 装
-- **ripgrep (`rg`)**（可选） — 全文搜索快 5-10×。macOS `brew install ripgrep` / Windows `winget install BurntSushi.ripgrep.MSVC` / 或 [release page](https://github.com/BurntSushi/ripgrep/releases)。没装时自动 fallback 到 `git grep`
-
-相关官方项目（由 Pivot 团队维护，与本 skill 独立）：[team-pivot-web](https://github.com/hashSTACS-Global/team-pivot-web)（服务端 + Web UI）、[vscode-team-pivot](https://github.com/hashSTACS-Global/vscode-team-pivot)、[intellij-team-pivot](https://github.com/hashSTACS-Global/intellij-team-pivot)。
+相关官方项目（由 Pivot 团队维护，与本 skill 独立）：[team-pivot-web](https://github.com/hashSTACS-Global/team-pivot-web)（服务端 + Web UI + MCP 实现）、[vscode-team-pivot](https://github.com/hashSTACS-Global/vscode-team-pivot)、[intellij-team-pivot](https://github.com/hashSTACS-Global/intellij-team-pivot)。
 
 English: [README.md](README.md)
 
-## Installation
+## 前置依赖
 
-### agent 一键装
+- **Claude Code** 已安装（`~/.claude/skills/` 存在或可创建）。
+- **Pivot MCP server 已配置**（推荐）。在 Claude Code 里 `/mcp` 应能看到 `pivot` server。MCP 是首选运行路径。
+- **Python 3.8+** 用于 CLI/runner 兜底。macOS Ventura+ 不再预装 Python，可从 [python.org](https://www.python.org/downloads/) 或 Homebrew（`brew install python`）安装；Windows 可用 python.org 安装器并勾选加入 PATH。
+- **PyYAML** 只在使用 `runner.py` pipeline 时需要：`python3 -m pip install pyyaml`。`bin/pivot.py` 原子命令不需要。
+  - macOS Ventura+ 使用 python.org 安装器时可能遇到 PEP 668 `externally-managed-environment`。推荐顺序：
+    1. `brew install python`，再 `python3 -m pip install pyyaml`
+    2. `python3 -m pip install --user pyyaml`
+    3. 最后才用 `python3 -m pip install --break-system-packages pyyaml`
+- **git** 用于 clone、升级和本地 mirror。
+- **ripgrep (`rg`)** 可选但推荐，mirror 全文搜索更快；没有时 CLI 会 fallback 到 `git grep`。
+
+## 安装
+
+### 让 agent 一键装
 
 把下面这段发给 Claude Code：
 
-```
+```text
 按 https://github.com/Jianping-Xiong/claudecode-team-pivot 的 README Installation 章节帮我装。
 ```
 
-Claude 会按当前 OS 挑下面对应的命令执行，并引导你配 PAT。
+Claude 应该按当前 OS 安装为软链/junction；只有需要 CLI 兜底时才引导你配置 PAT。
 
-### 手动安装 · macOS / Linux
+### 手动安装 - macOS / Linux
 
 ```bash
 # 1. clone 到本地工作区
-#    SSH（推荐：已配 GitHub SSH key 的机器）：
 git clone git@github.com:Jianping-Xiong/claudecode-team-pivot.git \
   ~/repository/claudecode-team-pivot
-#    HTTPS（备用：这台机器没配 SSH key）：
+
+# HTTPS 备用：
 # git clone https://github.com/Jianping-Xiong/claudecode-team-pivot.git \
 #   ~/repository/claudecode-team-pivot
 
-# 2. 软链到 Claude Code skill 目录
+# 2. 软链到 Claude Code skills 目录
 mkdir -p ~/.claude/skills
 ln -s ~/repository/claudecode-team-pivot ~/.claude/skills/claudecode-team-pivot
 
-# 3. 建配置文件（下面的 runner.py setup 会填内容，也可以直接手改）
+# 3. 可选：创建 CLI 兜底配置
 mkdir -p ~/.pivot
 cp ~/.claude/skills/claudecode-team-pivot/config.example.json ~/.pivot/config.json
 ```
 
-### 手动安装 · Windows
+### 手动安装 - Windows
 
-重要：Git Bash 的 `ln -s` 在默认环境（没开 Dev Mode、也没设 `MSYS=winsymlinks:nativestrict`）下会**静默退化成完整复制**。复制意味着改源码不会同步到 skill 目录。**推荐用 directory junction**——不需要管理员、不需要 Dev Mode。
+重要：Git Bash 的 `ln -s` 在默认环境下可能静默退化成完整复制。复制意味着 repo 里的更新不会同步到 skill 目录。请用 **directory junction**，不需要管理员权限，也不需要 Developer Mode。
 
-推荐 PowerShell：对含中文字符的用户目录（比如 `C:\Users\熊剑平`）处理更干净。Git Bash 也行但路径语法要当心。
-
-**PowerShell**（推荐）：
+推荐 PowerShell，因为它对含中文字符的用户目录更稳。
 
 ```powershell
-# 1. clone 到本地（盘符按实际调整）
+# 1. clone
 git clone git@github.com:Jianping-Xiong/claudecode-team-pivot.git `
   D:\repository\claudecode-team-pivot
 
@@ -77,214 +78,211 @@ New-Item -ItemType Junction `
   -Path "$env:USERPROFILE\.claude\skills\claudecode-team-pivot" `
   -Target "D:\repository\claudecode-team-pivot"
 
-# 3. 建配置文件
+# 3. 可选：创建 CLI 兜底配置
 New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\.pivot" | Out-Null
 Copy-Item D:\repository\claudecode-team-pivot\config.example.json `
   "$env:USERPROFILE\.pivot\config.json"
 ```
 
-> PowerShell 注意：**不要**在 Windows PowerShell 5.1 下用 `Set-Content -Encoding UTF8` 重写 config——会加 UTF-8 BOM。上面的 `Copy-Item` 保留源文件编码，安全。要从头生成就用：`[System.IO.File]::WriteAllText("$env:USERPROFILE\.pivot\config.json", $content, (New-Object System.Text.UTF8Encoding $false))`。本 skill 用 `utf-8-sig` 读配置已经容忍 BOM，但其他工具未必。
-
-**Git Bash**（替代方案——注意 junction 那步仍推荐调用 PowerShell，`ln -s` 不安全）：
-
-```bash
-# 1. clone
-git clone git@github.com:Jianping-Xiong/claudecode-team-pivot.git \
-  /d/repository/claudecode-team-pivot
-
-# 2. 建 junction——委托给 PowerShell，Unicode 路径安全
-mkdir -p ~/.claude/skills
-powershell.exe -NoProfile -Command \
-  'New-Item -ItemType Junction `
-    -Path "$env:USERPROFILE\.claude\skills\claudecode-team-pivot" `
-    -Target "D:\repository\claudecode-team-pivot"'
-
-# 3. 建配置文件（Git Bash 路径是 Unix 风格 /d/... /c/...）
-mkdir -p ~/.pivot
-cp /d/repository/claudecode-team-pivot/config.example.json ~/.pivot/config.json
-```
-
-验证建的是真 junction 不是复制：
+验证是真 junction：
 
 ```powershell
 (Get-Item "$env:USERPROFILE\.claude\skills\claudecode-team-pivot").LinkType
-# 期望输出：Junction
+# 期望：Junction
 ```
 
-### 配 PAT（全平台通用）
+> PowerShell 注意：不要在 Windows PowerShell 5.1 下用 `Set-Content -Encoding UTF8` 重写 config，它会加 UTF-8 BOM。`Copy-Item` 会保留源文件编码。本工具用 `utf-8-sig` 读配置，能容忍 BOM，但其他工具未必。
 
-最快走**交互式 setup**：
+## 配置 CLI 兜底 PAT
+
+MCP 使用不依赖本仓库的本地 config。只有需要 `bin/pivot.py` 或 `runner.py` 时，才需要配置 `~/.pivot/config.json`。
+
+交互式 setup：
 
 ```bash
 # macOS / Linux
 python3 ~/.claude/skills/claudecode-team-pivot/runner.py setup
 
-# Windows（PowerShell）
+# Windows PowerShell
 python "$env:USERPROFILE\.claude\skills\claudecode-team-pivot\runner.py" setup
 ```
 
-它会问你：
-1. **你们团队的 Pivot 服务器 URL**（形如 `https://pivot.<your-team>.com`——登 Pivot Web 时用的那个域名）
-2. **PAT token**——在 `<base-url>/settings/api-tokens` 生成。命名按设备 + 客户端（`mac-cc` / `windows-cc`，不要和 `*-vs-code` 混用）。明文**只显示一次**，立即复制
+它会询问：
 
-setup 会把 `~/.pivot/config.json` 写成 UTF-8 无 BOM，并立刻跑 constructor 端到端校验，成功输出 `status: completed` + 下一步建议命令。
+1. **Pivot server URL**：你平时登录 Pivot Web 的域名。
+2. **PAT token**：在 `<base-url>/settings/api-tokens` 生成。建议按设备/客户端命名，例如 `mac-cc`、`windows-cc`。
 
-非交互（脚本化 / AI agent 驱动）：
+非交互配置：
 
 ```bash
 python runner.py setup --base-url https://pivot.<your-team>.com --token pvt_xxx
 ```
 
-**手动替代**：`cp config.example.json ~/.pivot/config.json`，编辑 `base_url` + `token`，然后 `python runner.py check-init` 验证。
-
-**验证命令**：
+验证 CLI 兜底：
 
 ```bash
-python runner.py check-init   # 或 python bin/pivot.py me
+python runner.py check-init
+python bin/pivot.py me
+python bin/pivot.py matters --limit 5
 ```
 
-`initialized: true` 或返你 profile 的 JSON 就通了。`[401:invalid_token]` 说明 token 错/过期/签发自别的域名（token 和 base_url 必须来自同一个部署）。
+常见失败：
 
-### 升级
+- `[401:invalid_token]`：token 错误、过期，或不是这个 `base_url` 签发的。
+- `[0:network_error]`：域名不可达、没开 VPN、URL 拼错。
+- `requires PyYAML`：你在用 `runner.py`，需要安装 `pyyaml`。
 
-装法是软链 / junction，升级只要**在本地 repo 里 `git pull`**——`~/.claude/skills/claudecode-team-pivot` 因为是链接，自动看到新文件，不用重装。
+## 升级
+
+因为安装方式是软链/junction，升级只需要在本地 clone 里拉代码，不用重装。
 
 ```bash
-cd ~/repository/claudecode-team-pivot          # 或 Windows 下 D:\repository\...
+cd ~/repository/claudecode-team-pivot      # Windows 下可用 D:\repository\...
 git pull
-python -m pip install --upgrade pyyaml          # 只有新增次要依赖时才需要
-python runner.py check-init                     # 安康检查
+python runner.py check-init                # 可选：CLI 兜底健康检查
+python bin/pivot.py matters --limit 5       # 可选：CLI 兜底 smoke test
 ```
 
-升级**纯叠加**——加文件、加可选运行时目录（`~/.pivot/sessions/` / `~/.pivot/drafts/`），不删不改。config 结构稳定，PAT、mirror clone、用户数据都不动。
-
-回滚：在同一个 clone 里 `git checkout <旧 tag>`。
-
-### 给 AI agent 装这个 skill 看
-
-如果你是 Claude Code 或别的 agent 在帮用户装，读这段：
-
-**这三件事必须问用户** — 不要默认：
-1. **安装路径** — 默认建议 `~/repository/claudecode-team-pivot`（macOS/Linux）或 `D:\repository\claudecode-team-pivot`（Windows），但用户可能偏好 `~/Codes/` 之类
-2. **Pivot 服务器 `base_url`** — 团队内部唯一，用户自己知道；**问他们**"你平时登 Pivot Web 用哪个 URL？"，别默认任何域名
-3. **PAT token** — 用户自己去 `<base-url>/settings/api-tokens` 生成（明文只给一次）。让用户粘过来；不要尝试帮他们自动化
-
-**有 setup 交互命令专门干这事**：
-
-```bash
-python runner.py setup
-```
-
-它按顺序问 base_url + token，写文件，跑校验——一条命令搞定。**agent 优先用它，别手动拼文件**。
-
-**常见失败模式要认得**：
-- `YOUR_DOMAIN placeholder` → base_url 还在模板值；问用户真实 URL
-- `[401:invalid_token]` → token 错/过期，或 token 是别的域名签发的
-- `[0:network_error]` → base_url 不通（没开 VPN？拼错？）
-- `requires PyYAML` → 跑 `python -m pip install pyyaml`
-
-### 卸载
-
-```bash
-# macOS / Linux / Windows (Git Bash)
-rm ~/.claude/skills/claudecode-team-pivot
-
-# Windows（cmd，如果装的时候用的是 mklink /J）
-rmdir "%USERPROFILE%\.claude\skills\claudecode-team-pivot"
-```
-
-`~/repository/` 下的 clone 不动；想删自己删。
+config、PAT、本地 mirror、sessions、drafts 都不会被动。
 
 ## 使用
 
-在 Claude Code 里直接用自然语言：
+在 Claude Code 里自然语言即可：
 
 - "pivot 上有啥新讨论"
-- "帮我看下 proposals/database-migration 那个讨论"
-- "给这个 thread 回一句：同意方案 A，先在测试环境跑一周"
+- "帮我看下这个 Pivot URL"
+- "帮我读一下 OPC-数字员工服务台-产品规划"
+- "给这个 matter 回一句：同意方案 A，先在测试环境跑一周"
 - "pivot 上谁提过 ClickHouse"
 - "这周讨论的重点是什么"
 
-Skill 会自动编排 REST API 调用和（可选）本地 git mirror 操作。任何写入操作（回复、@、改状态）**都会先展示草稿给你 review 确认**才发布。
+Skill 应该在 MCP 可用时优先选择 MCP。任何写入仍必须展示草稿并得到你明确确认后才能发布。
 
-## 命令
+## MCP 优先工作流
 
-### Pipeline（`runner.py`）
+当 `/mcp` 能看到 `pivot` 时，优先用这些工具：
 
-多步流程；有 LLM 推理 / 确认闸门时用。
-
-| 命令 | 作用 | 含 LLM 步 |
-|---|---|---|
-| `runner.py setup [--base-url U --token T]` | 交互式首次配置 | 无 |
-| `runner.py check-init` | 预检（config + token） | 无 |
-| `runner.py list` | 列可用 pipeline | 无 |
-| `runner.py read --thread <cat>/<slug>` | 抓 + 总结 thread + 建议下一步 | 有（summarize） |
-| `runner.py reply --thread <cat>/<slug> --draft-file F [...]` | 发回复，强制确认闸门 | 有（confirm） |
-| `runner.py draft --thread <cat>/<slug> --content-file F` | 草稿持久化到 `~/.pivot/drafts/`，校验 frontmatter | 无 |
-| `runner.py digest --since 7d` | sync + 按 thread 分组的 commit 汇总 | 有（group） |
-| `runner.py resume <session> --llm-output '<json>'` | LLM 工作完成后恢复暂停 pipeline | — |
-
-暂停时 runner 返 `{"status": "paused", "llm_request": {...}}`，调用方 agent 做 LLM 工作后 `resume`。
-
-### 原子命令（`bin/pivot.py`）
-
-每个都是单次 API / subprocess 调用；不需要 PyYAML。
-
-| 命令 | 作用 |
+| 工具 | 用途 |
 |---|---|
-| `pivot.py me` | 验证 token + 打印服务端/工作区信息 |
-| `pivot.py threads [--unread-first] [--category X] [--limit N]` | 列 thread |
-| `pivot.py show <cat>/<slug>` | thread 详情（posts + mentions） |
-| `pivot.py reply <cat>/<slug> --file F [--mention ids --mention-comment C]` | 发回复（**无确认闸门**，新代码建议走 `runner.py reply`） |
-| `pivot.py new <cat> --title T --file F` | 新 thread |
-| `pivot.py mention <cat>/<slug> --target-filename FN --mention ids --mention-comment C` | 独立 @ |
-| `pivot.py status <cat>/<slug> --to STATE [--reason R]` | 改状态 |
-| `pivot.py favorite <cat>/<slug> [--unfavorite]` | 收藏/取消 |
-| `pivot.py read <cat>/<slug>` | 标记已读 |
-| `pivot.py contacts [--search Q]` | 按名字查 open_id |
-| `pivot.py sync [--check]` | clone / pull 本地镜像 |
-| `pivot.py search <pattern>` | 镜像里全文搜 |
-| `pivot.py history [--since 7d]` | 镜像 git log 摘要 |
+| `mcp__pivot__resolve_context` | 解析 Pivot URL，获取 matter 快照和可用状态迁移。遇到 Pivot URL 时用它，不要 WebFetch。 |
+| `mcp__pivot__list_matters` | 列 matter，支持 `status`、`owner`、标题查询过滤。 |
+| `mcp__pivot__get_matter` | 获取 matter 元信息和时间线，不拉大正文。 |
+| `mcp__pivot__read_files` | 读取时间线文件正文，最多 5 个文件 / 50000 字符。 |
+| `mcp__pivot__create_file` | 创建时间线文件（`think / act / verify / result / insight`），可选带 `status_change`。 |
 
-完整参数 `pivot.py --help` 和 `runner.py --help`。
+MCP 目前不覆盖查联系人、独立 @-mention 评论、标已读、收藏、本地 mirror 搜索。这些用 CLI 兜底。
+
+严格规则：
+
+- `create_file` / 回复必须展示草稿正文，并得到用户明确确认。
+- `status_change` 必须由用户明确选择，绝不静默附加。
+- @-mention 会发飞书通知，运行 CLI `mention` 前必须确认目标人和评论。
+- 不为了改状态或提醒别人创建占位时间线文件。
+
+## CLI 命令
+
+原子命令使用 Matter API，参数是 `<matter_id>`，不是旧的 `<category>/<slug>` thread key。
+
+```bash
+python bin/pivot.py me
+python bin/pivot.py matters [--status X] [--owner X] [--q X] [--unread-first] [--favorite-only] [--limit N]
+python bin/pivot.py show <matter_id>
+python bin/pivot.py contacts --search <name>
+python bin/pivot.py mention <matter_id> --target-filename <F> --mention <ou_xxx,...> --mention-comment "短评"
+python bin/pivot.py favorite <matter_id> [--unfavorite]
+python bin/pivot.py read <matter_id>
+python bin/pivot.py sync [--check]
+python bin/pivot.py search <pattern>
+python bin/pivot.py history --since 7d
+```
+
+完整参数：
+
+```bash
+python bin/pivot.py --help
+python bin/pivot.py matters --help
+```
+
+## Runner Pipelines
+
+Runner 仍可用于复杂流程和旧 APP v0.4 集成。它接受 `<matter_id>`，也兼容 `<category>/<matter_id>`。
+
+```bash
+python runner.py read --thread <matter_id>
+python runner.py reply --thread <matter_id> --draft-file <path> [--mention <ou_xxx,...>]
+python runner.py draft --thread <matter_id> --content-file <path>
+python runner.py digest --since 7d
+python runner.py resume <session> --llm-output '<json>'
+```
+
+Runner protocol：
+
+- `completed`：把 `output` 展示给用户。
+- `paused`：agent 完成 `llm_request`，然后 `resume`。
+- `error`：展示错误，先修 config/network/token。
 
 ## 架构
 
-```
-~/.pivot/config.json             # PAT + base_url + mirror_dir
-        │
-        ▼
-bin/pivot.py                     # 瘦 CLI 派发（argparse）
-   ├── api.py                    # REST 封装（urllib，零依赖）
-   ├── mirror.py                 # git clone/pull（可选）
-   └── search.py                 # ripgrep / git grep
-        │
-        ▼
-team-pivot-web REST API          ← 所有写入走这
-        + git mirror（只读）     ← 读可选走这里加速
+```text
+Claude Code
+   |
+   | 首选
+   v
+Pivot MCP server                  # 当前 Matter API 主路径
+   |
+   v
+team-pivot-web /api/matters/*
+
+本仓库兜底工具：
+
+~/.pivot/config.json              # PAT + base_url + mirror_dir
+~/.pivot/sessions/                # 暂停的 runner session
+~/.pivot/drafts/                  # 持久化草稿
+~/pivot-mirror/                   # 本地 git mirror，用于搜索/历史
+        |
+        v
+bin/pivot.py                      # 原子 CLI 兜底
+runner.py                         # APP v0.4 pipeline runner
+        |
+        v
+team-pivot-web REST API
+        + git mirror
 ```
 
-- **写入永远走 REST**——服务端做原子 commit
-- **读默认走 REST** 保证新鲜；git mirror 是全文搜和大上下文场景的加速层
-- Mirror 默认路径 `~/pivot-mirror/`——**故意和 vscode-team-pivot 一致**，两个客户端共用一份 clone
+- 写入永远走服务端 API。
+- 读取优先 MCP/REST，保证新鲜。
+- git mirror 只是全文搜索和本地大上下文加速层。
+- Mirror 默认 `~/pivot-mirror/`，与 vscode-team-pivot 共用。
 
 ## 配置
 
-优先级：环境变量 > `~/.pivot/config.json` > 内置默认值
+优先级：环境变量 > `~/.pivot/config.json` > 内置默认值。
 
 | 字段 | 环境变量 | 默认值 |
 |---|---|---|
 | `base_url` | `PIVOT_BASE_URL` | `https://pivot.enclaws.ai` |
-| `token` | `PIVOT_TOKEN` | *（必填）* |
+| `token` | `PIVOT_TOKEN` | CLI/runner 必填 |
 | `mirror_dir` | `PIVOT_MIRROR_DIR` | `~/pivot-mirror` |
 
-> 内置 `base_url` 默认值只是占位。团队内部通常指向生产域名（比如 `https://pivot.enclaws.com`），装完之后到 `~/.pivot/config.json` 里改 `base_url`。装完 `pivot.py me` 报 `[0:network_error]` 基本就是这个原因。
+内置 `base_url` 只是内部部署占位。CLI 兜底刚装完就报 `[0:network_error]` 时，优先检查 `base_url`。
+
+## 给 AI Agent 安装时看
+
+要问用户：
+
+1. **安装路径**：可以建议 `~/repository/claudecode-team-pivot` 或 `D:\repository\claudecode-team-pivot`，但不要擅自假设。
+2. **Pivot MCP 是否可用**：用 `/mcp` 看有没有 `pivot`。
+3. **Pivot server `base_url`**：只有 CLI/runner 兜底需要。
+4. **PAT token**：只有 CLI/runner 兜底需要。用户在 `<base-url>/settings/api-tokens` 自己生成。
+
+配置兜底时优先用 `python runner.py setup`，不要手拼 config。
 
 ## 相关项目
 
-- [team-pivot-web](https://github.com/hashSTACS-Global/team-pivot-web) — 服务端 + Web UI，REST 契约源头
-- [vscode-team-pivot](https://github.com/hashSTACS-Global/vscode-team-pivot) — VS Code 扩展
-- [intellij-team-pivot](https://github.com/hashSTACS-Global/intellij-team-pivot) — IntelliJ 插件
+- [team-pivot-web](https://github.com/hashSTACS-Global/team-pivot-web) - 服务端 + Web UI + REST 契约 + MCP 实现
+- [vscode-team-pivot](https://github.com/hashSTACS-Global/vscode-team-pivot) - VS Code 扩展
+- [intellij-team-pivot](https://github.com/hashSTACS-Global/intellij-team-pivot) - IntelliJ 插件
+- [agent-pipeline-protocol](https://github.com/hashSTACS-Global/agent-pipeline-protocol) v0.4
 
 ## License
 
