@@ -9,17 +9,19 @@ Pivot 交互技能。**MCP 优先**（直连 Matter API，无编码问题），M
 
 ## MCP tools (primary path)
 
-Pivot MCP 服务器提供 5 个工具。当 MCP 已连接时（`/mcp` 可见 `pivot`），优先使用：
+Pivot MCP 服务器提供 7 个工具。当 MCP 已连接时（`/mcp` 可见 `pivot`），优先使用：
 
 | 工具 | 用途 |
 |---|---|
 | `mcp__pivot__resolve_context` | 解析 Pivot URL，获取 matter 快照 + 可用状态迁移。**任何 Pivot URL 都必须用此工具而非 WebFetch** |
 | `mcp__pivot__list_matters` | 列出 matter，支持 status/owner/q 过滤 |
-| `mcp__pivot__get_matter` | 获取 matter 元信息 + 时间线（不含正文） |
+| `mcp__pivot__get_matter` | 获取 matter 元信息 + 时间线（不含正文）。时间线含 6 种 type：think/act/verify/result/insight/owner_change |
 | `mcp__pivot__read_files` | 读取文件正文，最多 5 个/50000 字符 |
-| `mcp__pivot__create_file` | 创建时间线条目（think/act/verify/result/insight），可选附 status_change |
+| `mcp__pivot__create_file` | 创建时间线条目（think/act/verify/result/insight），可选附 status_change 和 mentions（@-mention） |
+| `mcp__pivot__create_matter` | 新建 matter（需 category/title/type/summary），同时创建第一篇文件，可选附 mentions |
+| `mcp__pivot__add_comment` | 给**已有文件**追加评论 / @-mention，等价于 Web 上点"@ 提及"按钮 |
 
-**MCP 不支持的能力**：查联系人、@-mention、标已读、收藏。这些走 CLI fallback。
+**MCP 不支持的能力**：查联系人、标已读、收藏。这些走 CLI fallback。
 
 ## CLI fallback (bin/pivot.py)
 
@@ -58,9 +60,16 @@ Runner protocol 不变：`completed` → 展示 output；`paused` → 完成 LLM
 
 `create_file` 可附带 `status_change`。**绝不默默附加、绝不默默跳过**。展示每个选项的 label + 目标状态，等用户明确选择。用户未选 = 不附加。
 
-### 2. @-mention 做不到就直说
+### 2. @-mention 优先走 MCP
 
-MCP 的 `create_file` 没有 mentions 参数。CLI 的 `mention` 命令通过 `POST /api/matters/{id}/comments` 支持。如果两种路径都不可用（如 open_id 未解析），直接告诉用户"这个需要你在 Pivot 网页上手动操作"，不发占位帖。
+**MCP 完整支持 @-mention，优先用：**
+- 创建文件时同时 @：`create_file` 的 `mentions` 参数（targets + say）
+- 给已有文件追加 @：`add_comment`（target_file + body + mentions）
+- 新建 matter 时 @：`create_matter` 的 `mentions` 参数
+
+**唯一需要 CLI 的场景**：open_id 未知时先查联系人：`python bin/pivot.py contacts --search <name>`，拿到 open_id 后再回 MCP 路径。
+
+如果联系人查不到且用户不知道 open_id，直接告知"需要在 Pivot 网页上手动操作"，不发占位帖。
 
 ### 3. 不发占位帖
 
@@ -76,18 +85,21 @@ MCP: `list_matters` → 按 unread/favorite 分组 → 展示。CLI: `python bin
 
 MCP: `resolve_context(url)` 或 `get_matter` + `read_files`。CLI: `python runner.py read --thread <matter_id>`
 
-### Reply
+### Create a new matter
 
-1. 草稿内容写入临时文件
-2. `python runner.py reply --thread <matter_id> --draft-file <path>`
-3. Pipeline 在 confirm 步暂停 → 原文展示计划 → 等用户 yes/no
-4. 用户确认后 resume
+MCP: `create_matter`（category / title / type=think / summary / body，可选 mentions）。确认草稿内容后再调用。
 
-### @-mention someone
+### Reply（在已有 matter 下追加文件）
 
-1. `python bin/pivot.py contacts --search <name>` 或 MCP `resolve_context` 查已有帖子的 creator/owner
-2. 确认 open_id 后：`python bin/pivot.py mention <matter_id> --target-filename <F> --mention <ou_xxx> --mention-comment "短评"`
-3. @-mention 会发飞书通知，务必确认后再执行
+MCP: `create_file`（matter_id / type / summary / body，可选 quote / status_change / mentions）。展示草稿等用户确认后调用。
+
+CLI fallback: `python runner.py reply --thread <matter_id> --draft-file <path>`
+
+### @-mention someone（对已有文件）
+
+1. 若已知 open_id / pinyin → 直接 MCP `add_comment`（matter_id / target_file / body / mentions）
+2. 若不知道 → `python bin/pivot.py contacts --search <name>` 查 open_id → 再用 `add_comment`
+3. @-mention 会发飞书通知，展示 targets + say 给用户确认后再执行
 
 ### Draft
 
@@ -101,8 +113,9 @@ MCP: `resolve_context(url)` 或 `get_matter` + `read_files`。CLI: `python runne
 
 | Action | Confirm? |
 |---|---|
+| `create_matter` | **Yes** — 展示 category/title/summary/body，等用户明确批准 |
 | `create_file` / reply | **Yes** — 展示草稿原文，等用户明确批准 |
-| `mention` | **Yes** — 展示目标人 + 评论，等用户明确批准 |
+| `add_comment` / `mention` | **Yes** — 展示目标文件 + targets + say，等用户明确批准 |
 | `favorite`, `read`, `sync` | No — 可逆/本地 |
 | `me`, `matters`, `show`, `contacts`, `search`, `history`, `read` | No — 只读 |
 
